@@ -7,11 +7,6 @@
 - [功能特性](#功能特性)
 - [系统架构](#系统架构)
 - [快速开始](#快速开始)
-- [配置说明](#配置说明)
-- [使用示例](#使用示例)
-- [工具集](#工具集)
-- [常见问题](#常见问题)
-- [开发指南](#开发指南)
 
 ## ✨ 功能特性
 
@@ -270,10 +265,6 @@ bridges:
     source_node: "car_1"
 ```
 
-**结果：**
-- ROS话题：`/gps/fix`
-- MQTT话题：`ros2/gps/fix`
-- 数据格式：`{"latitude": 22.5, "longitude": 114.0, ...}`
 
 #### 示例2：压缩图像桥接（带频率控制）
 
@@ -295,10 +286,6 @@ bridges:
     source_node: "car_1"
 ```
 
-**效果：**
-- ROS发布频率：30Hz
-- MQTT发送频率：0.2Hz（每5秒）
-- 带宽节省：99.3%
 
 #### 示例3：YOLO检测结果桥接
 
@@ -356,7 +343,7 @@ source install/setup.bash
 
 # 4. 启动桥接
 ros2 run ros_mqtt_bridge_node multi_bridge_manager
-
+```
 
 
 
