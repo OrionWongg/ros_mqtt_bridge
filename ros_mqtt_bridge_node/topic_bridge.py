@@ -1,0 +1,500 @@
+#!/usr/bin/env python3
+
+import rclpy
+from rclpy.node import Node
+from rclpy.subscription import Subscription
+from rclpy.publisher import Publisher
+import importlib
+import json
+import base64
+import numpy as np
+from typing import Dict, Any, Optional, Callable
+from datetime import datetime
+import array
+
+
+class TopicBridge:
+    """通用话题桥接器"""
+    
+    def __init__(self, 
+                 bridge_config: Dict[str, Any], 
+                 node: Node,
+                 mqtt_interface,
+                 message_builder,
+                 logger):
+        self.config = bridge_config
+        self.node = node
+        self.mqtt_interface = mqtt_interface
+        self.message_builder = message_builder
+        self.logger = logger
+        
+        # 桥接状态
+        self.name = bridge_config.get('name', 'unknown_bridge')
+        self.enabled = bridge_config.get('enabled', True)
+        self.subscription: Optional[Subscription] = None
+        self.message_count = 0
+        self.last_message_time = None
+        self.last_publish_time = None  # 新增：记录最后发布时间
+        self.start_time = datetime.now()
+        
+        # 解析配置
+        self.ros_config = bridge_config.get('ros_config', {})
+        self.mqtt_config = bridge_config.get('mqtt_config', {})
+        self.metadata = bridge_config.get('metadata', {})
+        
+        # 缓存解析的消息类型
+        self._message_class = None
+        
+    def start(self) -> bool:
+        """启动桥接器"""
+        if not self.enabled:
+            self.logger.info(f'桥接器 {self.name} 已禁用，跳过启动')
+            return True
+            
+        try:
+            # 动态导入消息类型
+            message_class = self._get_message_class()
+            if not message_class:
+                return False
+            
+            # 获取桥接方向
+            bridge_type = self.config.get('type', 'ros_to_mqtt')  # 默认为ROS到MQTT
+            ros_topic = self.ros_config.get('topic')
+            queue_size = self.ros_config.get('queue_size', 10)
+            
+            if bridge_type == 'mqtt_to_ros':
+                # 创建ROS发布者
+                self.publisher = self.node.create_publisher(
+                    message_class,
+                    ros_topic,
+                    queue_size
+                )
+                # 先设置回调，再订阅
+                mqtt_topic = self._build_mqtt_topic()
+                self.mqtt_interface.set_on_message_callback(self._mqtt_message_callback)
+                success = self.mqtt_interface.subscribe(mqtt_topic)
+                if not success:
+                    self.logger.error(f'订阅MQTT主题失败: {mqtt_topic}')
+                    return False
+                self.logger.info(f'已订阅MQTT主题: {mqtt_topic} -> ROS话题: {ros_topic}')
+            else:
+                # 创建ROS订阅者
+                self.subscription = self.node.create_subscription(
+                    message_class,
+                    ros_topic,
+                    self._message_callback,
+                    queue_size
+                )
+            
+            self.logger.info(f'✓ 桥接器 {self.name} 已启动')
+            self.logger.info(f'  ROS话题: {ros_topic}')
+            self.logger.info(f'  消息类型: {self.ros_config.get("message_type")}')
+            self.logger.info(f'  队列大小: {queue_size}')
+            return True
+            
+        except Exception as e:
+            self.logger.error(f'启动桥接器 {self.name} 失败: {str(e)}')
+            return False
+    
+    def stop(self):
+        """停止桥接器"""
+        if self.subscription:
+            self.node.destroy_subscription(self.subscription)
+            self.subscription = None
+        
+        if hasattr(self, 'publisher'):
+            self.node.destroy_publisher(self.publisher)
+            delattr(self, 'publisher')
+            
+            # 取消订阅MQTT主题
+            mqtt_topic = self._build_mqtt_topic()
+            self.mqtt_interface.unsubscribe(mqtt_topic)
+            
+        self.logger.info(f'✓ 桥接器 {self.name} 已停止')
+    
+    def _get_message_class(self):
+        """动态获取消息类型"""
+        if self._message_class:
+            return self._message_class
+            
+        try:
+            message_type = self.ros_config.get('message_type')
+            if not message_type:
+                self.logger.error(f'桥接器 {self.name} 未指定消息类型')
+                return None
+            
+            # 解析消息类型 例如: "std_msgs/String" -> ("std_msgs.msg", "String")
+            parts = message_type.split('/')
+            if len(parts) != 2:
+                self.logger.error(f'无效的消息类型格式: {message_type}')
+                return None
+            
+            package_name, class_name = parts
+            module_name = f'{package_name}.msg'
+            
+            # 动态导入模块
+            module = importlib.import_module(module_name)
+            message_class = getattr(module, class_name)
+            
+            self._message_class = message_class
+            self.logger.debug(f'成功加载消息类型: {message_type}')
+            return message_class
+            
+        except ImportError as e:
+            self.logger.error(f'无法导入消息类型 {message_type}: {str(e)}')
+            return None
+        except AttributeError as e:
+            self.logger.error(f'消息类型 {message_type} 中找不到类 {class_name}: {str(e)}')
+            return None
+        except Exception as e:
+            self.logger.error(f'加载消息类型时发生错误: {str(e)}')
+            return None
+    
+    def _message_callback(self, msg):
+        """ROS消息回调函数"""
+        try:
+            # 检查发送间隔限制
+            publish_interval = self.ros_config.get('publish_interval', None)
+            if publish_interval is not None:
+                current_time = datetime.now()
+                if self.last_publish_time is not None:
+                    elapsed = (current_time - self.last_publish_time).total_seconds()
+                    if elapsed < publish_interval:
+                        # 未达到发送间隔，跳过此消息
+                        self.logger.debug(f'桥接器 {self.name} 跳过消息 (间隔: {elapsed:.2f}s < {publish_interval}s)')
+                        return
+            
+            # 更新统计信息
+            self.message_count += 1
+            self.last_message_time = datetime.now()
+            self.last_publish_time = datetime.now()  # 记录发布时间
+            
+            # 提取数据
+            data = self._extract_message_data(msg)
+            if data is None:
+                self.logger.warning(f'桥接器 {self.name} 无法提取消息数据')
+                return
+            
+            # 构建MQTT消息
+            mqtt_message = self._build_mqtt_message(data)
+            
+            # 构建MQTT主题
+            mqtt_topic = self._build_mqtt_topic()
+            
+            # 发布到MQTT
+            qos = self.mqtt_config.get('qos', 1)
+            retain = self.mqtt_config.get('retain', False)
+            
+            success = self.mqtt_interface.publish(
+                mqtt_topic,
+                mqtt_message,
+                qos=qos,
+                retain=retain
+            )
+            
+            if success:
+                self.logger.debug(f'✓ 桥接器 {self.name} 消息已转发')
+                self.logger.debug(f'  主题: {mqtt_topic}')
+                self.logger.debug(f'  数据: {data}')
+            else:
+                self.logger.error(f'✗ 桥接器 {self.name} MQTT发布失败')
+                
+        except Exception as e:
+            self.logger.error(f'桥接器 {self.name} 处理消息时发生错误: {str(e)}')
+    
+    def _extract_message_data(self, msg) -> Any:
+        """提取消息数据（修改此处以传递msg到_process_field_data）"""
+        try:
+            data_field = self.ros_config.get('data_field', 'data')
+            
+            # 首先检查多字段提取（优先级更高）
+            if ',' in data_field:
+                # 多字段提取，如 "linear.x,angular.z"
+                fields = [field.strip() for field in data_field.split(',')]
+                result = {}
+                for field in fields:
+                    if '.' in field:
+                        # 嵌套访问
+                        obj = msg
+                        for field_part in field.split('.'):
+                            if hasattr(obj, field_part):
+                                obj = getattr(obj, field_part)
+                            else:
+                                self.logger.error(f'消息中找不到字段: {field_part}')
+                                return None
+                        # 处理字段数据时传入原始msg，用于获取图像格式
+                        result[field] = self._process_field_data(obj, field, msg=msg)
+                    else:
+                        # 简单字段
+                        if hasattr(msg, field):
+                            field_data = getattr(msg, field)
+                            # 处理字段数据时传入原始msg，用于获取图像格式
+                            result[field] = self._process_field_data(field_data, field, msg=msg)
+                        else:
+                            self.logger.error(f'消息中找不到字段: {field}')
+                            return None
+                return result
+            elif '.' in data_field:
+                # 单一嵌套字段访问，如 "pose.position.x"
+                obj = msg
+                for field_part in data_field.split('.'):
+                    if hasattr(obj, field_part):
+                        obj = getattr(obj, field_part)
+                    else:
+                        self.logger.error(f'消息中找不到字段: {field_part}')
+                        return None
+                # 处理字段数据时传入原始msg，用于获取图像格式
+                return self._process_field_data(obj, data_field, msg=msg)
+            else:
+                # 简单字段访问
+                if hasattr(msg, data_field):
+                    field_data = getattr(msg, data_field)
+                    # 处理字段数据时传入原始msg，用于获取图像格式
+                    return self._process_field_data(field_data, data_field, msg=msg)
+                else:
+                    self.logger.error(f'消息中找不到字段: {data_field}')
+                    return None
+                    
+        except Exception as e:
+            self.logger.error(f'提取消息数据时发生错误: {str(e)}')
+            return None
+    
+    def _process_field_data(self, data, field_name: str, msg=None) -> Any:
+        """处理字段数据，对二进制数据进行Base64编码并添加图像前缀"""
+        try:
+            # 获取消息类型信息
+            message_type = self.ros_config.get('message_type', '')
+            
+            # 检查是否是图像相关的数据字段
+            is_image_data = (
+                field_name == 'data' and 
+                message_type in ['sensor_msgs/Image', 'sensor_msgs/CompressedImage']
+            )
+            
+            # 如果是图像数据，进行特殊处理
+            if is_image_data:
+                self.logger.debug(f'检测到图像数据字段: {field_name}, 消息类型: {message_type}, 数据类型: {type(data)}')
+                
+                # 确定图像格式（jpeg/png）
+                format_prefix = 'jpeg'  # 默认值
+                if message_type == 'sensor_msgs/CompressedImage' and msg:
+                    # 从CompressedImage消息的format字段提取格式
+                    img_format = getattr(msg, 'format', '').lower()
+                    if 'png' in img_format:
+                        format_prefix = 'png'
+                    elif 'jpeg' in img_format or 'jpg' in img_format:
+                        format_prefix = 'jpeg'
+                
+                # 处理不同类型的数据（新增对 array.array 的支持）
+                if isinstance(data, bytes):
+                    byte_data = data
+                elif isinstance(data, np.ndarray):
+                    byte_data = data.tobytes()
+                elif isinstance(data, array.array):  # 处理 array.array 类型
+                    byte_data = data.tobytes()  # 转换为 bytes
+                else:
+                    self.logger.warning(f'未知的图像数据类型: {type(data)}')
+                    return str(data)
+                
+                # 编码为Base64并添加前缀
+                base64_str = base64.b64encode(byte_data).decode('utf-8')
+                return f"data:image/{format_prefix};base64,{base64_str}"
+            
+            # 非图像数据的处理逻辑（保持不变，可同样添加 array.array 支持）
+            if isinstance(data, bytes):
+                return base64.b64encode(data).decode('utf-8')
+            elif isinstance(data, np.ndarray):
+                return base64.b64encode(data.tobytes()).decode('utf-8')
+            elif isinstance(data, array.array):  # 非图像的 array 类型也转换为Base64
+                return base64.b64encode(data.tobytes()).decode('utf-8')
+            elif hasattr(data, '__dict__'):
+                return self._object_to_dict(data)
+            elif hasattr(data, '__iter__') and not isinstance(data, (str, dict)):
+                return [self._process_field_data(item, field_name, msg=msg) for item in data]
+            else:
+                return data
+                
+        except Exception as e:
+            self.logger.error(f'处理字段数据时发生错误: {str(e)}')
+            return None
+    def _object_to_dict(self, obj) -> Dict[str, Any]:
+        """将ROS消息对象转换为字典"""
+        try:
+            if obj is None:
+                return None
+            
+            result = {}
+            
+            # 获取对象的所有字段
+            if hasattr(obj, 'get_fields_and_field_types'):
+                # ROS2消息对象
+                fields = obj.get_fields_and_field_types()
+                for field_name in fields.keys():
+                    if hasattr(obj, field_name):
+                        field_value = getattr(obj, field_name)
+                        
+                        # 递归处理嵌套对象
+                        if hasattr(field_value, '__dict__') and hasattr(field_value, 'get_fields_and_field_types'):
+                            result[field_name] = self._object_to_dict(field_value)
+                        elif isinstance(field_value, (list, tuple)):
+                            result[field_name] = [
+                                self._object_to_dict(item) if (hasattr(item, '__dict__') and hasattr(item, 'get_fields_and_field_types')) else item
+                                for item in field_value
+                            ]
+                        elif isinstance(field_value, (bytes, np.ndarray, array.array)):
+                            # 二进制数据转为base64
+                            if isinstance(field_value, bytes):
+                                result[field_name] = base64.b64encode(field_value).decode('utf-8')
+                            elif isinstance(field_value, np.ndarray):
+                                result[field_name] = base64.b64encode(field_value.tobytes()).decode('utf-8')
+                            elif isinstance(field_value, array.array):
+                                result[field_name] = base64.b64encode(field_value.tobytes()).decode('utf-8')
+                        else:
+                            # 基本类型直接赋值
+                            result[field_name] = field_value
+            else:
+                # 普通对象（非ROS2消息）
+                for key, value in obj.__dict__.items():
+                    if not key.startswith('_'):
+                        if hasattr(value, '__dict__'):
+                            result[key] = self._object_to_dict(value)
+                        elif isinstance(value, (list, tuple)):
+                            result[key] = [
+                                self._object_to_dict(item) if hasattr(item, '__dict__') else item
+                                for item in value
+                            ]
+                        else:
+                            result[key] = value
+            
+            return result
+            
+        except Exception as e:
+            self.logger.error(f'对象转换为字典时发生错误: {str(e)}')
+            return str(obj)
+
+    
+    def _build_mqtt_message(self, data) -> Dict[str, Any]:
+        """构建MQTT消息"""
+        try:
+            # 获取元数据
+            source_node = self.metadata.get('source_node', 'unknown_node')
+            frame_id = self.metadata.get('frame_id', 'unknown_frame')
+            
+            # 使用消息构建器
+            mqtt_message = self.message_builder.create_ros_message(
+                source_node=source_node,
+                source_topic=self.ros_config.get('topic'),
+                data=data,
+                message_id=self.message_count,
+                frame_id=frame_id
+            )
+            
+            # 添加桥接器特定的元数据
+            mqtt_message.update({
+                'bridge_name': self.name,
+                'bridge_message_count': self.message_count,
+                'bridge_uptime_seconds': (datetime.now() - self.start_time).total_seconds(),
+                'bridge_config': {
+                    'ros_topic': self.ros_config.get('topic'),
+                    'message_type': self.ros_config.get('message_type'),
+                    'data_field': self.ros_config.get('data_field')
+                }
+            })
+            
+            return mqtt_message
+            
+        except Exception as e:
+            self.logger.error(f'构建MQTT消息时发生错误: {str(e)}')
+            return {}
+    
+    def _build_mqtt_topic(self) -> str:
+        """构建MQTT主题路径"""
+        try:
+            # 从全局配置获取前缀
+            topic_prefix = self.mqtt_interface.get_config().get('topic_prefix', 'ros2')
+            topic_name = self.mqtt_config.get('topic_name', 'unknown')
+            topic_suffix = self.mqtt_config.get('topic_suffix', 'data')
+            
+            return f'{topic_prefix}/{topic_name}/{topic_suffix}'
+            
+        except Exception as e:
+            self.logger.error(f'构建MQTT主题时发生错误: {str(e)}')
+            return 'ros2/unknown/data'
+    
+    def get_statistics(self) -> Dict[str, Any]:
+        """获取桥接器统计信息"""
+        uptime = (datetime.now() - self.start_time).total_seconds()
+        
+        return {
+            'bridge_name': self.name,
+            'enabled': self.enabled,
+            'message_count': self.message_count,
+            'uptime_seconds': uptime,
+            'last_message_time': self.last_message_time.isoformat() if self.last_message_time else None,
+            'message_rate': self.message_count / uptime if uptime > 0 else 0.0,
+            'ros_config': self.ros_config,
+            'mqtt_config': self.mqtt_config,
+            'metadata': self.metadata
+        }
+    
+    def is_active(self, timeout_seconds: float = 10.0) -> bool:
+        """检查桥接器是否活跃"""
+        if not self.last_message_time:
+            return False
+        
+        elapsed = (datetime.now() - self.last_message_time).total_seconds()
+        return elapsed < timeout_seconds
+    
+    def _mqtt_message_callback(self, topic: str, payload: bytes):
+        """处理从MQTT接收到的消息"""
+        try:
+            # 更新统计信息
+            self.message_count += 1
+            self.last_message_time = datetime.now()
+            
+            # 解析MQTT消息
+            try:
+                mqtt_message = json.loads(payload.decode('utf-8'))
+                # 如果消息是简单类型（如布尔值），直接使用
+                if isinstance(mqtt_message, (bool, int, float, str)):
+                    data = mqtt_message
+                else:
+                    # 否则尝试获取数据字段
+                    data = mqtt_message.get('data', mqtt_message)
+            except json.JSONDecodeError:
+                # 如果不是JSON格式，尝试直接解码为字符串
+                data = payload.decode('utf-8')
+            
+            # 创建ROS消息
+            message_class = self._get_message_class()
+            if not message_class:
+                return
+            
+            ros_msg = message_class()
+            
+            # 获取目标字段名
+            data_field = self.ros_config.get('data_field', 'data')
+            
+            # 设置消息字段
+            if hasattr(ros_msg, data_field):
+                field_type = type(getattr(ros_msg, data_field))
+                # 转换数据类型以匹配目标字段
+                try:
+                    converted_data = field_type(data)
+                    setattr(ros_msg, data_field, converted_data)
+                except (ValueError, TypeError) as e:
+                    self.logger.error(f'数据类型转换失败: {str(e)}')
+                    return
+            else:
+                self.logger.error(f'ROS消息类型没有字段: {data_field}')
+                return
+            
+            # 发布到ROS话题
+            if hasattr(self, 'publisher'):
+                self.publisher.publish(ros_msg)
+                self.logger.debug(f'✓ 已发布到ROS话题: {self.ros_config.get("topic")}')
+            else:
+                self.logger.error('未找到ROS发布者')
+                
+        except Exception as e:
+            self.logger.error(f'处理MQTT消息时发生错误: {str(e)}')

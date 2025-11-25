@@ -1,0 +1,203 @@
+# ROS2-MQTT多话题桥接配置文件
+# 配置文件版本
+version: "1.0"
+
+# 全局MQTT配置
+mqtt_global:
+  broker_host: "120.24.79.108"
+  broker_port: 1883
+  topic_prefix: "ros2"
+  client_id_prefix: "ros_mqtt_bridge"
+  keepalive: 30  # 心跳间隔
+  qos: 1 # 此MQTT的QoS等级 0 最多交付一次 1 至少交付一次 2 只交付一次
+  username: "zone"
+  password: "NeverGiveUp"
+
+# 全局桥接配置
+bridge_global:
+  enable_statistics: true
+  enable_heartbeat: true
+  message_history_size: 50  # 减少历史记录大小，节省内存
+  connection_check_interval: 5.0  # 更频繁的连接检查
+  stats_publish_interval: 30.0
+  heartbeat_interval: 60.0
+
+# 话题桥接配置列表
+bridges:
+  
+  - name: "GPS_bridge" 
+    description: "GPS经纬度数据桥接"
+    enabled: true
+    ros_config:
+      topic: "/gps/fix"
+      message_type: "sensor_msgs/NavSatFix"
+      data_field: "latitude,longitude"  # 提取GPS经纬度信息
+      queue_size: 10
+    mqtt_config:
+      topic_name: "gps"
+      topic_suffix: "fix"
+      qos: 0
+      retain: false
+    metadata:
+      source_node: "car_1"
+      frame_id: "gps_frame"
+
+  - name: "Compressed_Image_Data_bridge_0" 
+    description: "压缩图像0完整数据桥接(Base64编码)"
+    enabled: true  # 启用压缩图像数据传输
+    ros_config:
+      topic: "/image_raw_0/compressed"
+      message_type: "sensor_msgs/CompressedImage"
+      data_field: "data"  # 传输压缩后的图像二进制数据
+      queue_size: 5  # 增加队列大小，避免消息丢失
+      publish_interval: 5.0  # 发送间隔：5秒发送一次
+    mqtt_config:
+      topic_name: "image_compressed_0" 
+      topic_suffix: "data"
+      qos: 1  # 使用QoS 0减少开销，提高性能
+      retain: false
+    metadata:
+      source_node: "car_1"
+      frame_id: "camera_frame"
+
+  - name: "Compressed_Image_Data_bridge_1" 
+    description: "压缩图像1完整数据桥接(Base64编码)"
+    enabled: true  # 启用压缩图像数据传输
+    ros_config:
+      topic: "/image_raw_1/compressed"
+      message_type: "sensor_msgs/CompressedImage"
+      data_field: "data"  # 传输压缩后的图像二进制数据
+      queue_size: 5  # 增加队列大小，避免消息丢失
+      publish_interval: 5.0  # 发送间隔：5秒发送一次
+    mqtt_config:
+      topic_name: "image_compressed_1" 
+      topic_suffix: "data"
+      qos: 1  # 使用QoS 0减少开销，提高性能
+      retain: false
+    metadata:
+      source_node: "car_1"
+      frame_id: "camera_frame"
+
+  - name: "event_trigger_bridge"  # 唯一标识名
+    description: "事件触发消息桥接"  # 描述
+    enabled: true  # 启用该桥接
+    type: mqtt_to_ros  # 桥接类型：MQTT到ROS
+    ros_config:
+      topic: "/event_trigger"  # 对应的ROS话题（根据实际情况修改，例如你的ROS节点发布到这个话题）
+      message_type: "std_msgs/String"  # ROS消息类型（根据实际消息类型修改，如自定义消息）
+      data_field: "data"  # 提取的消息字段（如std_msgs/String的data字段，若为自定义消息需填对应字段）
+      queue_size: 10  # ROS订阅队列大小
+    mqtt_config:
+      topic_name: "event_trigger"  # 主题名（结合prefix和suffix组成最终MQTT主题）
+      topic_suffix: "data"  # 后缀为空，避免多一层路径
+      qos: 0  # 该桥接的QoS等级（根据需求设置0/1/2）
+      retain: false  # 是否保留消息
+    metadata:
+      source_node: "car_1"  # 发布该ROS消息的节点名（自定义）
+      frame_id: "event_frame"  # 坐标系ID（自定义，非必需）
+
+  - name: "YOLO_detection_bridge_0"
+    description: "YOLO检测结果0数据桥接"
+    enabled: true
+    ros_config:
+      topic: "/detections_0"  # YOLO检测话题
+      message_type: "yolo_msgs/DetectionArray"  # 消息类型：DetectionArray（包含多个检测结果）
+      data_field: "detections"  # 提取detections字段（Detection数组）
+      queue_size: 5
+    mqtt_config:
+      topic_name: "yolo"  # MQTT主题名称前缀
+      topic_suffix: "detections_0"  # MQTT主题后缀
+      qos: 1  # 使用QoS 1确保可靠传输
+      retain: false
+    metadata:
+      source_node: "car_1"
+      frame_id: "camera_0_frame"
+
+  - name: "YOLO_detection_bridge_1"
+    description: "YOLO检测结果1数据桥接"
+    enabled: true
+    ros_config:
+      topic: "/detections_1"  # YOLO检测话题
+      message_type: "yolo_msgs/DetectionArray"  # 消息类型：DetectionArray（包含多个检测结果）
+      data_field: "detections"  # 提取detections字段（Detection数组）
+      queue_size: 5
+    mqtt_config:
+      topic_name: "yolo"  # MQTT主题名称前缀
+      topic_suffix: "detections_1"  # MQTT主题后缀
+      qos: 1  # 使用QoS 1确保可靠传输
+      retain: false
+    metadata:
+      source_node: "car_1"
+      frame_id: "camera_1_frame"
+
+  - name: "VLM_bridge"
+    description: "检测结果桥接"  # 描述与话题含义一致，无需修改
+    enabled: true
+    ros_config:
+      topic: "/vlm_output"  # 正确匹配ROS2话题，无需修改
+      message_type: "std_msgs/String"  # 与话题类型一致，无需修改
+      data_field: "data"  # std_msgs/String的核心字段就是data（字符串内容），正确无需修改
+      queue_size: 5  # 队列大小合理，无需修改
+    mqtt_config:
+      topic_name: "vlm"  # 前缀与话题前缀匹配，无需修改
+      topic_suffix: "output"  # 后缀与话题后缀匹配，组合后为"vlm/output"，合理无需修改
+      qos: 1  # QoS等级合理，无需修改
+      retain: false  # 非状态类消息无需保留，合理无需修改
+    metadata:
+      source_node: "car_1"  # 源节点描述合理，无需修改
+      frame_id: "vlm_frame"  
+
+      
+  - name: "Battery_bridge"
+    description: "电池信息数据桥接"
+    enabled: true
+    ros_config:
+      topic: "/battery_info"  # 电池信息ROS话题
+      message_type: "std_msgs/Float64"  # 消息类型
+      data_field: "data"  # Float64消息的核心数据字段
+      queue_size: 5  # 电池信息更新频率通常较低，队列大小可设小一些
+    mqtt_config:
+      topic_name: "battery"  # MQTT主题名称前缀
+      topic_suffix: "info"  # MQTT主题后缀
+      qos: 1  # 电池信息建议使用QoS 1确保可靠传输
+      retain: false  # 保留最后一条电池信息，方便新客户端订阅时获取当前状态
+    metadata:
+      source_node: "car_1"
+      frame_id: "battery_frame"
+
+  - name: "Speed_bridge"
+    description: "速度信息数据桥接"
+    enabled: true
+    ros_config:
+      topic: "/speed"  # 速度信息ROS话题
+      message_type: "std_msgs/Float64"  # 消息类型
+      data_field: "data"  # Float64消息的核心数据字段
+      queue_size: 5  # 电池信息更新频率通常较低，队列大小可设小一些
+    mqtt_config:
+      topic_name: "speed"  # MQTT主题名称前缀
+      topic_suffix: "info"  # MQTT主题后缀
+      qos: 1  # 电池信息建议使用QoS 1确保可靠传输
+      retain: false  # 保留最后一条电池信息，方便新客户端订阅时获取当前状态
+    metadata:
+      source_node: "car_1"
+      frame_id: "speed_frame"
+
+  - name: "Stat_bridge"
+    description: "车辆状态信息数据桥接"
+    enabled: true
+    ros_config:
+      topic: "/car_stat"  # 速度信息ROS话题
+      message_type: "std_msgs/Float64"  # 消息类型
+      data_field: "data"  # Float64消息的核心数据字段
+      queue_size: 5  
+    mqtt_config:
+      topic_name: "car"  # MQTT主题名称前缀
+      topic_suffix: "stat"  # MQTT主题后缀
+      qos: 1  # 建议使用QoS 1确保可靠传输
+      retain: false  # 保留最后一条信息，方便新客户端订阅时获取当前状态
+    metadata:
+      source_node: "car_1"
+      frame_id: "stat_frame"
+
+
+
