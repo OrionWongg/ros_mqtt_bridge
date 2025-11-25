@@ -14,13 +14,10 @@ source install/setup.bash
 ros2 run ros_mqtt_bridge_node multi_bridge_manager
 ```
 
-## 📄 许可证
-
-本项目采用 [MIT License](LICENSE)
 
 ## 👥 作者
 
-- 开发者：OrionWongg,sc,Yesord
+- 开发者：OrionWongg,SC,Yesord
 
 
 ## 📮 联系方式
