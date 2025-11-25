@@ -355,219 +355,10 @@ colcon build --packages-select ros_mqtt_bridge_node
 source install/setup.bash
 
 # 4. 启动桥接
-ros2 launch ros_mqtt_bridge_node multi_bridge_manager.launch.py
+ros2 run ros_mqtt_bridge_node multi_bridge_manager
 
-# 5. 验证运行
-ros2 topic list | grep mqtt
-ros2 topic echo /ros_mqtt_bridge/statistics
-```
 
-### 2. 调试模式
 
-```bash
-# 启用详细日志
-ros2 run ros_mqtt_bridge_node multi_bridge_manager --ros-args --log-level debug
-
-# 查看特定话题
-ros2 topic echo /ros_mqtt_bridge/heartbeat
-```
-
-### 3. 性能监控
-
-```bash
-# 查看统计信息
-ros2 topic echo /ros_mqtt_bridge/statistics
-
-# 查看消息速率
-ros2 topic hz /image_raw_0/compressed
-```
-
-### 4. 配置测试
-
-启用/禁用特定桥接：
-
-```yaml
-bridges:
-  - name: "Test_Bridge"
-    enabled: false  # 设为false暂时禁用
-    # ...
-```
-
-## 🛠️ 工具集
-
-项目提供了多个实用工具，位于 `tools/` 目录。
-
-### 1. MQTT图像验证工具
-
-**文件：** `mqtt_image_validator.py`
-
-**功能：** 验证MQTT图像传输是否正常
-
-```bash
-# 基本使用
-cd ~/ros2_ws/src/ros_mqtt_bridge_node/tools
-python3 mqtt_image_validator.py
-
-# 启用图像保存
-python3 mqtt_image_validator.py --save --save-dir ./test_images
-
-# 自定义话题
-python3 mqtt_image_validator.py --topics ros2/image_compressed_0/data
-
-# 查看帮助
-python3 mqtt_image_validator.py --help
-```
-
-**详细说明：** 参见 [IMAGE_VALIDATOR_GUIDE.md](tools/IMAGE_VALIDATOR_GUIDE.md)
-
-### 2. MQTT监控工具
-
-**文件：** `mqtt_monitor.py`
-
-**功能：** 监控所有MQTT消息
-
-```bash
-python3 mqtt_monitor.py
-```
-
-### 3. ZIP文件传输工具
-
-**发送端：** `zip_sender.py`
-
-```bash
-# 配置文件：config/zip_sender_config.yaml
-ros2 run ros_mqtt_bridge_node zip_sender
-```
-
-**接收端：** `zip_receiver.py`
-
-```bash
-ros2 run ros_mqtt_bridge_node zip_receiver
-```
-
-**详细说明：** 参见 [ARCHIVE_FEATURE_GUIDE.md](tools/ARCHIVE_FEATURE_GUIDE.md)
-
-### 4. 图像传输工具
-
-**查看工具：** `mqtt_image_viewer.py`
-
-```bash
-python3 mqtt_image_viewer.py
-```
-
-**详细说明：** 参见 [IMAGE_TRANSFER_GUIDE.md](tools/IMAGE_TRANSFER_GUIDE.md)
-
-## ❓ 常见问题
-
-### Q1: MQTT连接失败
-
-**症状：** 无法连接到MQTT服务器
-
-**解决方案：**
-
-```bash
-# 检查网络连接
-ping 120.24.79.108
-
-# 检查端口
-telnet 120.24.79.108 1883
-
-# 验证用户名密码
-# 在配置文件中确认 username 和 password
-```
-
-### Q2: 图像传输失败
-
-**症状：** 图像无法正常显示或解码失败
-
-**可能原因：**
-1. Base64编码问题
-2. 图像格式不匹配
-3. MQTT消息大小限制
-
-**解决方案：**
-
-```bash
-# 1. 使用验证工具测试
-python3 tools/mqtt_image_validator.py
-
-# 2. 检查图像大小
-ros2 topic bw /image_raw_0/compressed
-
-# 3. 调整压缩质量（如果使用image_transport）
-# 修改摄像头节点的压缩参数
-```
-
-### Q3: 频率控制不生效
-
-**症状：** 设置了 `publish_interval` 但发送频率没有改变
-
-**解决方案：**
-
-```bash
-# 1. 确认配置文件已修改
-cat config/multi_bridge_config.yaml | grep publish_interval
-
-# 2. 重新编译
-cd ~/ros2_ws
-colcon build --packages-select ros_mqtt_bridge_node
-
-# 3. 重新加载环境
-source install/setup.bash
-
-# 4. 重启节点
-ros2 launch ros_mqtt_bridge_node multi_bridge_manager.launch.py
-```
-
-### Q4: 消息丢失
-
-**症状：** 部分消息没有传输到MQTT
-
-**可能原因：**
-1. QoS设置为0
-2. 网络不稳定
-3. 队列大小不足
-
-**解决方案：**
-
-```yaml
-# 提高QoS等级
-mqtt_config:
-  qos: 1  # 或 2
-
-# 增加队列大小
-ros_config:
-  queue_size: 20
-```
-
-### Q5: 内存占用过高
-
-**症状：** 长时间运行后内存占用增加
-
-**解决方案：**
-
-```yaml
-# 减少消息历史记录大小
-bridge_global:
-  message_history_size: 10  # 默认50
-```
-
-### Q6: 话题名称找不到
-
-**症状：** 启动后提示找不到ROS话题
-
-**解决方案：**
-
-```bash
-# 1. 确认话题存在
-ros2 topic list
-
-# 2. 确认话题类型
-ros2 topic info /your_topic
-
-# 3. 确认配置文件中的话题名称正确
-# 注意话题名称区分大小写，必须以 / 开头
-```
 
 ## 🔧 开发指南
 
@@ -659,39 +450,12 @@ ros_mqtt_bridge_node/
 │   ├── file_transfer_util.py         # 文件传输工具
 │   ├── zip_sender.py                 # ZIP发送节点
 │   └── zip_receiver.py               # ZIP接收节点
-├── tools/
-│   ├── mqtt_image_validator.py       # 图像验证工具
-│   ├── mqtt_monitor.py               # MQTT监控工具
-│   ├── mqtt_image_viewer.py          # 图像查看工具
-│   ├── IMAGE_VALIDATOR_GUIDE.md      # 验证工具说明
-│   ├── IMAGE_TRANSFER_GUIDE.md       # 图像传输说明
-│   └── ARCHIVE_FEATURE_GUIDE.md      # 文件传输说明
 ├── package.xml
 ├── setup.py
 ├── setup.cfg
 └── README.md                         # 本文件
 ```
 
-## 📊 性能指标
-
-### 典型性能
-
-| 指标 | 数值 |
-|------|------|
-| 最大并发桥接数 | 20+ |
-| 图像传输延迟 | < 100ms |
-| CPU占用 | < 5% |
-| 内存占用 | < 200MB |
-| 消息吞吐量 | > 1000 msg/s |
-
-### 带宽优化
-
-使用频率控制前后对比（图像传输）：
-
-| 场景 | 原始频率 | 优化后频率 | 带宽节省 |
-|------|----------|------------|----------|
-| 图像(30Hz) | 30 fps | 0.2 fps (5s) | 99.3% |
-| GPS(10Hz) | 10 Hz | 1 Hz (1s) | 90% |
 
 ## 🤝 贡献指南
 
@@ -717,9 +481,8 @@ cd ros_mqtt_bridge_node
 
 ## 👥 作者
 
-- 开发者：OrionWongg
-- 项目：hqiit_vlm
-- 分支：dev_ant
+- 开发者：OrionWongg,sc,Yesord
+
 
 ## 📮 联系方式
 
