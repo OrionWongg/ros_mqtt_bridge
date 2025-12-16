@@ -130,23 +130,6 @@ bridges:
       source_node: "car_1"
       frame_id: "camera_1_frame"
 
-  # - name: "VLM_bridge"
-  #   description: "检测结果桥接"  # 描述与话题含义一致，无需修改
-  #   enabled: true
-  #   ros_config:
-  #     topic: "/vlm_output"  # 正确匹配ROS2话题，无需修改
-  #     message_type: "std_msgs/String"  # 与话题类型一致，无需修改
-  #     data_field: "data"  # std_msgs/String的核心字段就是data（字符串内容），正确无需修改
-  #     queue_size: 5  # 队列大小合理，无需修改
-  #   mqtt_config:
-  #     topic_name: "vlm"  # 前缀与话题前缀匹配，无需修改
-  #     topic_suffix: "output"  # 后缀与话题后缀匹配，组合后为"vlm/output"，合理无需修改
-  #     qos: 1  # QoS等级合理，无需修改
-  #     retain: false  # 非状态类消息无需保留，合理无需修改
-  #   metadata:
-  #     source_node: "car_1"  # 源节点描述合理，无需修改
-  #     frame_id: "vlm_frame"  
-
       
   - name: "Battery_bridge"
     description: "电池信息数据桥接"
