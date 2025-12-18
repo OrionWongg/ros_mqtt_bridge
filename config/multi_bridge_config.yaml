@@ -33,6 +33,7 @@ bridges:
       message_type: "sensor_msgs/NavSatFix"
       data_field: "latitude,longitude"  # 提取GPS经纬度信息
       queue_size: 10
+      publish_interval: 5.0  # 发送间隔：5秒发送一次
     mqtt_config:
       topic_name: "gps"
       topic_suffix: "fix"
@@ -51,6 +52,7 @@ bridges:
       data_field: "data"  # 传输压缩后的图像二进制数据
       queue_size: 5  # 增加队列大小，避免消息丢失
       publish_interval: 5.0  # 发送间隔：5秒发送一次
+      extract_header_timestamp: true  # 提取ROS header时间戳
     mqtt_config:
       topic_name: "image_compressed_0" 
       topic_suffix: "data"
@@ -58,7 +60,7 @@ bridges:
       retain: false
     metadata:
       source_node: "car_1"
-      frame_id: "camera_frame"
+      frame_id: "camera_0_frame"
 
   - name: "Compressed_Image_Data_bridge_1" 
     description: "压缩图像1完整数据桥接(Base64编码)"
@@ -69,6 +71,7 @@ bridges:
       data_field: "data"  # 传输压缩后的图像二进制数据
       queue_size: 5  # 增加队列大小，避免消息丢失
       publish_interval: 5.0  # 发送间隔：5秒发送一次
+      extract_header_timestamp: true  # 提取ROS header时间戳
     mqtt_config:
       topic_name: "image_compressed_1" 
       topic_suffix: "data"
@@ -76,7 +79,7 @@ bridges:
       retain: false
     metadata:
       source_node: "car_1"
-      frame_id: "camera_frame"
+      frame_id: "camera_1_frame"
 
   - name: "event_trigger_bridge"  # 唯一标识名
     description: "事件触发消息桥接"  # 描述
@@ -104,6 +107,8 @@ bridges:
       message_type: "yolo_msgs/DetectionArray"  # 消息类型：DetectionArray（包含多个检测结果）
       data_field: "detections"  # 提取detections字段（Detection数组）
       queue_size: 5
+      publish_interval: 5.0  # 发送间隔：5秒发送一次
+      extract_header_timestamp: true  # 提取ROS header时间戳
     mqtt_config:
       topic_name: "yolo"  # MQTT主题名称前缀
       topic_suffix: "detections_0"  # MQTT主题后缀
@@ -121,6 +126,8 @@ bridges:
       message_type: "yolo_msgs/DetectionArray"  # 消息类型：DetectionArray（包含多个检测结果）
       data_field: "detections"  # 提取detections字段（Detection数组）
       queue_size: 5
+      publish_interval: 5.0  # 发送间隔：5秒发送一次
+      extract_header_timestamp: true  # 提取ROS header时间戳
     mqtt_config:
       topic_name: "yolo"  # MQTT主题名称前缀
       topic_suffix: "detections_1"  # MQTT主题后缀
@@ -139,6 +146,7 @@ bridges:
       message_type: "std_msgs/Float64"  # 消息类型
       data_field: "data"  # Float64消息的核心数据字段
       queue_size: 5  # 电池信息更新频率通常较低，队列大小可设小一些
+      publish_interval: 5.0  # 发送间隔：5秒发送一次
     mqtt_config:
       topic_name: "battery"  # MQTT主题名称前缀
       topic_suffix: "info"  # MQTT主题后缀
@@ -156,6 +164,7 @@ bridges:
       message_type: "std_msgs/Float64"  # 消息类型
       data_field: "data"  # Float64消息的核心数据字段
       queue_size: 5  # 电池信息更新频率通常较低，队列大小可设小一些
+      publish_interval: 5.0  # 发送间隔：5秒发送一次
     mqtt_config:
       topic_name: "speed"  # MQTT主题名称前缀
       topic_suffix: "info"  # MQTT主题后缀
@@ -170,9 +179,10 @@ bridges:
     enabled: true
     ros_config:
       topic: "/car_stat"  # 速度信息ROS话题
-      message_type: "std_msgs/Float64"  # 消息类型
+      message_type: "std_msgs/Int8"  # 消息类型
       data_field: "data"  # Float64消息的核心数据字段
       queue_size: 5  
+      publish_interval: 5.0  # 发送间隔：5秒发送一次
     mqtt_config:
       topic_name: "car"  # MQTT主题名称前缀
       topic_suffix: "stat"  # MQTT主题后缀
@@ -187,9 +197,10 @@ bridges:
     enabled: true
     ros_config:
       topic: "/planner_stat"  # 速度信息ROS话题
-      message_type: "std_msgs/int8"  # 消息类型
+      message_type: "std_msgs/Int8"  # 消息类型
       data_field: "data"  # Float64消息的核心数据字段
       queue_size: 5  
+      publish_interval: 5.0  # 发送间隔：5秒发送一次
     mqtt_config:
       topic_name: "planner"  # MQTT主题名称前缀
       topic_suffix: "stat"  # MQTT主题后缀

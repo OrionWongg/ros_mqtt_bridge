@@ -169,14 +169,19 @@ class TopicBridge:
             self.last_message_time = datetime.now()
             self.last_publish_time = datetime.now()  # 记录发布时间
             
+            # 提取ROS header时间戳（如果配置启用）
+            header_timestamp = None
+            if self.ros_config.get('extract_header_timestamp', False):
+                header_timestamp = self._extract_header_timestamp(msg)
+            
             # 提取数据
             data = self._extract_message_data(msg)
             if data is None:
                 self.logger.warning(f'桥接器 {self.name} 无法提取消息数据')
                 return
             
-            # 构建MQTT消息
-            mqtt_message = self._build_mqtt_message(data)
+            # 构建MQTT消息（传入header时间戳）
+            mqtt_message = self._build_mqtt_message(data, header_timestamp=header_timestamp)
             
             # 构建MQTT主题
             mqtt_topic = self._build_mqtt_topic()
@@ -201,6 +206,41 @@ class TopicBridge:
                 
         except Exception as e:
             self.logger.error(f'桥接器 {self.name} 处理消息时发生错误: {str(e)}')
+    
+    def _extract_header_timestamp(self, msg) -> Optional[Dict[str, Any]]:
+        """提取ROS header时间戳"""
+        try:
+            if hasattr(msg, 'header'):
+                header = msg.header
+                if hasattr(header, 'stamp'):
+                    stamp = header.stamp
+                    # 提取秒和纳秒
+                    seconds = stamp.sec if hasattr(stamp, 'sec') else 0
+                    nanoseconds = stamp.nanosec if hasattr(stamp, 'nanosec') else 0
+                    
+                    # 转换为总秒数（浮点）
+                    timestamp_sec = seconds + nanoseconds * 1e-9
+                    
+                    # 同时提供ISO格式的时间戳（用于人类可读）
+                    from datetime import datetime, timezone
+                    dt = datetime.fromtimestamp(timestamp_sec, tz=timezone.utc)
+                    
+                    self.logger.debug(f'提取到header时间戳: {timestamp_sec}秒 ({dt.isoformat()})')
+                    
+                    return {
+                        'secs': seconds,
+                        'nsecs': nanoseconds,
+                        'timestamp': timestamp_sec,
+                        'iso_time': dt.isoformat()
+                    }
+                else:
+                    self.logger.debug('header中没有stamp字段')
+            else:
+                self.logger.debug('消息中没有header字段')
+            return None
+        except Exception as e:
+            self.logger.error(f'提取header时间戳时发生错误: {str(e)}')
+            return None
     
     def _extract_message_data(self, msg) -> Any:
         """提取消息数据（修改此处以传递msg到_process_field_data）"""
@@ -373,7 +413,7 @@ class TopicBridge:
             return str(obj)
 
     
-    def _build_mqtt_message(self, data) -> Dict[str, Any]:
+    def _build_mqtt_message(self, data, header_timestamp: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """构建MQTT消息"""
         try:
             # 获取元数据
@@ -400,6 +440,10 @@ class TopicBridge:
                     'data_field': self.ros_config.get('data_field')
                 }
             })
+            
+            # 添加ROS header时间戳（如果存在）
+            if header_timestamp is not None:
+                mqtt_message['header_timestamp'] = header_timestamp
             
             return mqtt_message
             
